@@ -1,0 +1,47 @@
+.app {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+button {
+  padding: 8px 16px;
+  background: #555;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #666;
+}
+
+.active {
+  background: #007bff;
+}
+
+.disabled {
+  color: #333;
+  cursor: default;
+  pointer-events: none;
+}
+
+.sliderGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: white;
+}
+
+.sliderGroup input {
+  width: 100px;
+}
+
+.canvas {
+  flex: 1;
+  background: #222;
+}

@@ -1,0 +1,5 @@
+*.sh
+.env
+pnpm-lock.yaml
+notes/
+node_modules/

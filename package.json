@@ -1,0 +1,27 @@
+{
+  "name": "vite-template-solid",
+  "version": "0.0.0",
+  "description": "",
+  "type": "module",
+  "scripts": {
+    "start": "vite",
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "vite preview"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "vite-plugin-solid": "^2.11.6"
+  },
+  "dependencies": {
+    "@tailwindcss/typography": "^0.5.16",
+    "@tailwindcss/vite": "^4.0.13",
+    "daisyui": "^5.0.3",
+    "element-resize-detector": "^1.2.4",
+    "force-graph": "^1.49.3",
+    "idb-keyval": "^6.2.1",
+    "solid-js": "^1.9.5",
+    "tailwindcss": "^4.0.13"
+  }
+}
