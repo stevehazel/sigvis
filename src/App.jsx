@@ -2,8 +2,8 @@ import { createSignal, createEffect, createResource, onMount, onCleanup, batch }
 import styles from './App.module.css';
 
 import {
-    SignalEngine,
-} from './engine';
+    Canvas2D,
+} from './canvas2d';
 
 import {
     setups as staticSetups,
@@ -51,7 +51,7 @@ function App() {
   const [savedList, {mutate, refetch}] = createResource(ready, fetchSavedList)
 
   onMount(() => {
-      SS = new SignalEngine(el());
+      SS = new Canvas2D(el());
       SS.init({
           INITIAL_NUM_NODES,
       });
