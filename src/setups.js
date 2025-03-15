@@ -264,7 +264,7 @@ const intro = {
       },
     },
     {
-      title: '3. The link between the two circles is strengthened',
+      title: '3. The two circles get closer together',
       config: {
         GREEDY_REMOVAL: true,
         MAX_GROUP_LEVELS: 1,
@@ -286,7 +286,7 @@ const intro = {
     },
 
     {
-      title: 'But! The strength of the link rapidly decays',
+      title: 'But! They tend to drift apart ',
       config: {
         GREEDY_REMOVAL: true,
         MAX_GROUP_LEVELS: 1,
@@ -307,7 +307,7 @@ const intro = {
       },
     },
     {
-      title: 'What happens with a few more circles?',
+      title: 'Let\'s add a few more circles and see what happens',
       /*saveID: 'six',*/
       start: true,
       reset: true,
