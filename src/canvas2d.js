@@ -546,8 +546,7 @@ export class Canvas2D {
                     target: l.target.id,
                 }
             }),
-            nodes: engineData.nodes.map(nodeID => {
-                const node = engineData.nodes[nodeID];
+            nodes: engineData.nodes.map(node => {
                 return node.serialize();
             }),
         }
