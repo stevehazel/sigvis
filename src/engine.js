@@ -15,49 +15,30 @@ import { genIdentity_Color } from './identity';
 export class SignalEngine {
     lastNodeID = 100;
 
+    MULTI_HIT = false;
+
     BASE_NODE_RADIUS = 30;
 
-    GLOBAL_SCALE = 1;
-
     LINKING_ENABLED = true;
-    LINKS_WEAK_VISIBLE = false;
-    LINKS_STRONG_VISIBLE = true;
-    LINKS_PERMA_VISIBLE = true;
-
+    EMITS_ENABLED = false;
     GREEDY_REMOVAL = false;
-
-    EMITS_VISIBLE = false;
-    BACKGROUND_ENABLED = false;
 
     NUM_NODES = 50;
     MAX_GROUP_LEVELS = 3;
     EMIT_RATE = 0.02;
     DECAY_RATE = 0.05;
 
-    DECAY_RATE_OVERRIDE = false;
-    PARTICLE_DENSITY = 100000;
-
-    RENDER_CELLS = false;
-
     NODE_GROUP_THRESHOLD = 3;    
     NODE_HEALTH = 200;
-    NODE_HEALTH_VISIBLE = true;
     SIGNAL_WEIGHT = 100;
     SIGNAL_COST = 1;
-
-    EMIT_LENGTH_MULTIPLIER = 4;
-    EMIT_LENGTH_DISTANCE = false;
-    EMIT_WIDTH_MULTIPLIER = 1;
-    EMIT_OPACITY_MULTIPLIER = 1;
 
     LINK_STRONG = 10000; // should be proportional to max-similarity strength value
     LINK_PERMA_BOND = true;
     LINK_PERMA_BOND_THRESHOLD = this.LINK_STRONG * 10;
 
-    MIN_VISIBLE_LEVEL = 1;
-
     constructor() {
-        this.nodeIdx = [];
+        this.nodeIdx = {};
         this.links = [];
         this.emits = [];
     }
@@ -85,7 +66,6 @@ export class SignalEngine {
         this.INITIALIZED = true;
     }
 
-    
     control(action, v, w) {
         if (action == 'config') {
             Object.entries(v).forEach(([configID, val]) => {
@@ -100,7 +80,7 @@ export class SignalEngine {
             this.LINKING_ENABLED = !this.LINKING_ENABLED;
         }
         else if (action == 'toggleEmits') {
-            this.EMITS_VISIBLE = !this.EMITS_VISIBLE;
+            this.EMITS_ENABLED = !this.EMITS_ENABLED;
         }
     }
 
@@ -169,6 +149,12 @@ export class SignalEngine {
                 if (!sourceNode.identity) debugger
                 const signal = new Signal(sourceNode, this.SIGNAL_WEIGHT);
                 signal.cost = this.SIGNAL_COST;
+                signal.randVec = {
+                    x: Math.random() - 0.5,
+                    y: Math.random() - 0.5,
+                    z: Math.random() - 0.5
+                };
+
                 return signal;
             });
 
@@ -198,14 +184,12 @@ export class SignalEngine {
                         return;
                     }
 
-                    if (!signal.rayHit(target)) {
+                    if (!this.rayHit(signal, target)) {
                         return
                     }
 
                     // Distance between node centers
-                    let distance = Math.sqrt(
-                        ((target.x - sourceNode.x) ** 2) + ((target.y - sourceNode.y) ** 2)
-                    );
+                    let distance = this.calcNodeDistance(sourceNode, target);
 
                     // Distance between node edges
                     distance -= sourceNode.radius
@@ -229,7 +213,7 @@ export class SignalEngine {
                     }
                 });
 
-                if (this.EMITS_VISIBLE) {
+                if (this.EMITS_ENABLED) {
                     if (!nearestHit) {
                         this.emits.push(signal);
                     }
@@ -288,67 +272,79 @@ export class SignalEngine {
                     */
 
                     if (nearestHit) {
-                        const { target, distance } = nearestHit;
+                        hitNodes = hitNodes.sort((a, b) => a.distance - b.distance)
 
-                        let f = 1.0;
-                        const diff = sourceNode.level - target.level;
-                        if (diff > 0) {
-                            // Source is bigger
-                            f *= (diff + 1) ** 0.5;
-                        }
-                        else if (diff < 0) {
-                            // Target is bigger
-                            f /= (diff + 1) ** 0.5;
+                        if (!this.MULTI_HIT) {
+                            hitNodes = [nearestHit];
                         }
 
-                        signal.update(target.identity, f, target.id);
+                        hitNodes.forEach((hitNode, idx) =>{
+                            const { target, distance } = hitNode;
 
-                        target.color = target.identity.toColor();
+                            //console.log('hit', distance, sourceNode.id, target.id)
 
-                        let similarity = calcScore2(signal.identity, target.identity);
-                        if (similarity <= 0) {
-                            return;
-                        }
+                            let f = 1.0;
+                            const diff = sourceNode.level - target.level;
+                            if (diff > 0) {
+                                // Source is bigger
+                                f *= (diff + 1) ** 0.5;
+                            }
+                            else if (diff < 0) {
+                                // Target is bigger
+                                f /= (diff + 1) ** 0.5;
+                            }
 
-                        if (this.LINKING_ENABLED) {
-                            // Update or create link
-                            const existingLink = this.links.find(l => 
-                                (l.source.id === sourceNode.id && l.target.id === target.id)
-                            );
+                            f /= (idx + 1) ** 2;
 
-                            if (existingLink) {
-                                const updatedLinkStrength = (existingLink.strength || 0) + similarity;
-                                if (this.LINK_PERMA_BOND && updatedLinkStrength >= this.LINK_PERMA_BOND_THRESHOLD) {
-                                    existingLink.strength = this.LINK_PERMA_BOND_THRESHOLD;
-                                    existingLink.permaBond = true;
+                            signal.update(target.identity, f, target.id);
+
+                            target.color = target.identity.toColor();
+
+                            let similarity = calcScore2(signal.identity, target.identity);
+                            if (similarity <= 0) {
+                                return;
+                            }
+
+                            if (this.LINKING_ENABLED) {
+                                // Update or create link
+                                const existingLink = this.links.find(l =>
+                                    (l.source.id === sourceNode.id && l.target.id === target.id)
+                                );
+
+                                if (existingLink) {
+                                    const updatedLinkStrength = (existingLink.strength || 0) + similarity;
+                                    if (this.LINK_PERMA_BOND && updatedLinkStrength >= this.LINK_PERMA_BOND_THRESHOLD) {
+                                        existingLink.strength = this.LINK_PERMA_BOND_THRESHOLD;
+                                        existingLink.permaBond = true;
+                                    }
+                                    else {
+                                        existingLink.strength = updatedLinkStrength;
+                                    }
                                 }
                                 else {
-                                    existingLink.strength = updatedLinkStrength;
+                                    // console.log(`adding new link from ${sourceNode.id} to ${target.id}`)
+
+                                    newLinks.push({
+                                        source: sourceNode,
+                                        target,
+                                        strength: similarity,
+                                        //curvature: 0.05,
+                                    });
+
+                                    /*console.log(`adding reciprocal link from ${target.id} to ${sourceNode.id}`)
+                                    newLinks.push({
+                                        target,
+                                        source: sourceNode,
+                                        strength: similarity,
+                                        curvature: -0.05,
+                                        feedback: true,
+                                    });*/
                                 }
                             }
-                            else {
-                                // console.log(`adding new link from ${sourceNode.id} to ${target.id}`)
 
-                                newLinks.push({
-                                    source: sourceNode,
-                                    target,
-                                    strength: similarity,
-                                    //curvature: 0.05,
-                                });
-
-                                /*console.log(`adding reciprocal link from ${target.id} to ${sourceNode.id}`)
-                                newLinks.push({
-                                    target,
-                                    source: sourceNode,
-                                    strength: similarity,
-                                    curvature: -0.05,
-                                    feedback: true,
-                                });*/
-                            }
-                        }
-
-                        sourceNode.health = Math.min(sourceNode.baseHealth, sourceNode.health + Math.pow(similarity, 0.25));
-                        target.health = Math.min(target.baseHealth, target.health + Math.pow(similarity, 0.125));
+                            sourceNode.health = Math.min(sourceNode.baseHealth, sourceNode.health + Math.pow(similarity, 0.25));
+                            target.health = Math.min(target.baseHealth, target.health + Math.pow(similarity, 0.125));
+                        });
                     }
                 }
 
@@ -377,7 +373,7 @@ export class SignalEngine {
 
                         if (this.LINKING_ENABLED) {
                             // Update or create link
-                            const existingLink = this.links.find(l => 
+                            const existingLink = this.links.find(l =>
                                 (l.source.id === sourceNode.id && l.target.id === target.id)
                             );
 
@@ -417,7 +413,7 @@ export class SignalEngine {
 
         Object.values(this.nodeIdx).forEach(node => {
             if (node.isContained) {
-                return
+                return;
             }
 
             if (node.health <= 0) {
@@ -427,14 +423,16 @@ export class SignalEngine {
                 if (node.containedNodes?.length) {
                     this.downLevelNode(node);
                 }
+                this.cleanupNode(node);
 
-                delete this.nodeIdx[node.id]
+                delete this.nodeIdx[node.id];
             }
         });
 
         const now = Date.now();
         this.emits = this.emits.filter(signal => {
-            if (signal.h <= 0 || now - signal.ts > 2000) {
+            if (signal.h <= 0 || now - signal.ts > 2000 || !this.EMITS_ENABLED || !this.nodeIdx[signal.source.id]) {
+                this.cleanupSignal(signal);
                 signal.identity = null;
                 signal = null;
 
@@ -443,6 +441,9 @@ export class SignalEngine {
             return true;
         });
     }
+
+    cleanupSignal(signal) {}
+    cleanupNode(node) {}
 
     setMaxGroupLevels(maxLevels) {
         let dirty = false;
@@ -461,6 +462,7 @@ export class SignalEngine {
                     this.links = this.links.filter(l => l.source.id !== node.id && l.target.id !== node.id);
 
                     this.downLevelNode(node);
+                    this.cleanupNode(node);
                     delete this.nodeIdx[node.id];
 
                     dirty = true;
@@ -709,7 +711,7 @@ export class SignalEngine {
                 }
             })
             .sort((a, b) => {
-                return b.linkStrength - a.linkStrength;
+                return a.linkStrength - b.linkStrength;
             });
 
         // Get the top N
@@ -724,6 +726,9 @@ export class SignalEngine {
                     }
                     return link.source.id !== nodeID && link.target.id !== nodeID
                 });
+
+                const node = this.nodeIdx[nodeID];
+                this.cleanupNode(node);
 
                 delete this.nodeIdx[nodeID];
             });

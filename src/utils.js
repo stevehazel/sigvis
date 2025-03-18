@@ -122,20 +122,37 @@ export function blendColors(colorList, asArray = false) {
 }
 
 
-export function createCanvasThumbnail(sourceCtx, thumbnailWidth = 150) {
+export function createCanvasThumbnail(sourceCtx, thumbnailWidth = 150, sourceDim = null) {
     const sourceCanvas = sourceCtx.canvas
 
     // Create a new canvas for the thumbnail
     const thumbnailCanvas = document.createElement('canvas');
 
     // Calculate proportional height based on source canvas aspect ratio
-    const thumbnailHeight = (sourceCanvas.height * thumbnailWidth) / sourceCanvas.width;
+    let thumbnailHeight;
+    if (sourceDim) {
+        thumbnailHeight = (sourceDim.height * thumbnailWidth) / sourceDim.width;
+    }
+    else {
+        thumbnailHeight = (sourceCanvas.height * thumbnailWidth) / sourceCanvas.width;
+    }
+
 
     thumbnailCanvas.width = thumbnailWidth;
     thumbnailCanvas.height = thumbnailHeight;
 
     const thumbnailCtx = thumbnailCanvas.getContext('2d');
-    thumbnailCtx.drawImage(sourceCanvas, 0, 0, thumbnailWidth, thumbnailHeight);
+
+    if (sourceDim) {
+        thumbnailCtx.drawImage(
+            sourceCanvas,
+            sourceDim.x, sourceDim.y, sourceDim.width, sourceDim.height,
+            0, 0, thumbnailWidth, thumbnailHeight
+        );
+    }
+    else {
+        thumbnailCtx.drawImage(sourceCanvas, 0, 0, thumbnailWidth, thumbnailHeight);
+    }
 
     return thumbnailCanvas.toDataURL('image/png');
 }

@@ -5,29 +5,24 @@ import {
     calcArea,
     blendColors,
     createCanvasThumbnail,
-    choiceFrom,
-    filledArray,
     JSONFromIDB,
     ToJSONIDB,
     delIDB,
-    calculateTotalAreaRadius,
 } from './utils';
+
+import { Node } from './node';
 
 import {
     ParticleLayer,
 } from './particles';
 
 import { SignalEngine } from './engine.js'
-import { Node } from './node';
-import { Signal } from './signal';
-import { genIdentity_Color } from './identity';
-
+import { UIConfig } from './uiconfig';
 
 export class Canvas2D {
     RUN_ID = null;
     ZOOM_INTERVAL = null;
     lastAnimationFrame = null;
-    lastNodeID = 100;
 
     BASE_NODE_RADIUS = 30;
     ZOOM_MIN_LINK_STRENGTH = 100;
@@ -92,11 +87,15 @@ export class Canvas2D {
         const el = this.el
 
         this.reset();
+        const moduleId = 'Flat'
 
         this.RUN_ID = parseInt((Math.random() * 900000) + 100000);
         console.log('init signals', this.RUN_ID);
 
         this.engine = new SignalEngine();
+
+        this.engine.rayHit = this.rayHit.bind(this);
+        this.engine.calcNodeDistance = this.calcNodeDistance.bind(this);
 
         const graph = ForceGraph()(el);
         this.graph = graph;
@@ -144,6 +143,20 @@ export class Canvas2D {
 
         graph.onNodeClick(node => {
             console.log('node clicked', node);
+        });
+
+        graph.onBackgroundRightClick(e => {
+            if (this.chunks) {
+                // check chunk-state and inject at mouse position
+
+                console.log('graph.onBackgroundRightClick', e)
+                this.chunks.forEach(chunk => {
+                    if (chunk.selected) {
+                        console.log('chunk is selected', chunk.id)
+                        this.injectChunk(chunk.id, {x: e.layerX, y: e.layerY});
+                    }
+                })
+            }
         });
 
         graph.linkWidth(this.linkWidth);
@@ -199,6 +212,33 @@ export class Canvas2D {
         this.FIRST_RUN = false;
     }
 
+    calcNodeDistance(nodeA, nodeB) {
+        return Math.sqrt(
+            ((nodeA.x - nodeB.x) ** 2) + ((nodeA.y - nodeB.y) ** 2)
+        );
+    }
+
+    rayHit(signal, targetNode) {
+        // Calculate intersection with circle
+        const dx = targetNode.x - signal.x;
+        const dy = targetNode.y - signal.y;
+
+        const a = (signal.dx * signal.dx) + (signal.dy * signal.dy);
+        const b = 2 * ((dx * signal.dx) + (dy * signal.dy));
+        const c = (dx * dx) + (dy * dy) - Math.pow(targetNode.radius, 2);
+        const discriminant = (b * b) - 4 * a * c;
+
+        if (discriminant < 0) {
+            return false;
+        }
+
+        const t = (-b - Math.sqrt(discriminant)) / (2 * a);
+        if (t < 0) {
+            return false;
+        }
+
+        return true;
+    }
 
     linkWidth(link) {
         const maxWidth = Math.min(link.source.radius, link.target.radius) * 2 * this.GLOBAL_SCALE;
@@ -238,7 +278,10 @@ export class Canvas2D {
         }
         if (this.LINK_PERMA_BOND && link.permaBond) {
             if (this.LINKS_PERMA_VISIBLE) {
-                return 'rgba(255,165,0,0.85)';
+                const colorList = [link.source.color, link.target.color];
+                const permaLinkColor = this.buildColor(blendColors(colorList, true));
+
+                return permaLinkColor; //'rgba(255,165,0,0.85)';
             }
         }
         else if (link.strength >= this.LINK_STRONG) {
@@ -321,20 +364,25 @@ export class Canvas2D {
                     const y = e.clientY - rect.top;
 
                     const lastPath = this.drawingPaths[this.drawingPaths.length - 1];
-                    lastPath.timestamp = Date.now();
-                    lastPath.points.push({
-                        x,
-                        y,
-                        timestamp: Date.now(),
-                    });
-                    this.drawShape();
+                    if (lastPath) {
+                        lastPath.timestamp = Date.now();
+                        lastPath.points.push({
+                            x,
+                            y,
+                            timestamp: Date.now(),
+                        });
+                        this.drawShape();
+                    }
                 }
             });
 
             canvas.addEventListener('mouseup', (e) => {
-                if (this.isDrawing) {
-                    this.isDrawing = false;
-                    this.drawShape();
+                if (e.button === 2) {
+                    if (this.isDrawing) {
+                        this.isDrawing = false;
+                        this.drawShape();
+                        this.extractNodes();
+                    }
                 }
             });
 
@@ -345,9 +393,109 @@ export class Canvas2D {
         }
     }
 
+    extractNodes() {
+        function isPointInPolygon(x, y, polygon) {
+            let inside = false;
+            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                const xi = polygon[i].x;
+                const yi = polygon[i].y;
+                const xj = polygon[j].x;
+                const yj = polygon[j].y;
+
+                const intersect = ((yi > y) !== (yj > y)) &&
+                    (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+
+        let minX = Infinity,
+            maxX = -Infinity,
+            minY = Infinity,
+            maxY = -Infinity;
+
+        const lastPath = this.drawingPaths[this.drawingPaths.length - 1].points;
+        const selectedNodes = []
+        Object.values(this.engine.nodeIdx).forEach(node => {
+            if (node.isContained) {
+                return;
+            }
+
+            const screenCoords = this.graph.graph2ScreenCoords(node.x, node.y);
+            if (isPointInPolygon(screenCoords.x, screenCoords.y, lastPath)) {
+                selectedNodes.push(node);
+
+                if (node.x - node.radius < minX) {
+                    minX = node.x - node.radius;
+                }
+                else if (node.x + node.radius > maxX) {
+                    maxX = node.x + node.radius;
+                }
+
+                if (node.y - node.radius < minY) {
+                    minY = node.y - node.radius;
+                }
+                else if (node.y + node.radius > maxY) {
+                    maxY = node.y + node.radius;
+                }
+            }
+        });
+
+
+        // FIXME: Don't save here.
+        if (selectedNodes.length > 0) {
+
+            if (selectedNodes.length == 1) {
+                const selNode = selectedNodes[0];
+                const dim = selNode.radius * 1.25 * this.GLOBAL_SCALE;
+                minX = selNode.x - dim;
+                maxX = selNode.x + dim;
+                minY = selNode.y - dim;
+                maxY = selNode.y + dim;
+            }
+
+            const nodeIdx = {};
+            selectedNodes.forEach(node => {
+                nodeIdx[node.id] = node;
+
+                if (node.containedNodes?.length > 0) {
+                    node.containedNodes.forEach(containedNodeID => {
+                        nodeIdx[containedNodeID] = this.engine.nodeIdx[containedNodeID];
+                    });
+                }
+            });
+
+            // Have all the nodes, now grab all the links
+            // Ignore links with a target node that isn't in this set
+
+            const links = this.engine.links.filter(link => {
+                return link.source.id in nodeIdx && link.target.id in nodeIdx;
+            });
+
+            this.saveChunk(
+                {
+                    nodes: Object.values(nodeIdx),
+                    links,
+                },
+                null,
+                {
+                    width: Math.abs(maxX - minX),
+                    height: Math.abs(maxY - minY),
+                    ...this.graph.graph2ScreenCoords(minX, minY)
+                });
+
+            // FIXME: shouldn't be here
+            this.chunkAdded();
+        }
+    }
+
     drawShape() {
         const ctx = this.ctx;
         const graph = this.graph;
+
+        if (!graph) {
+            return;
+        }
 
         let drawingPaths = this.drawingPaths;
         if (!drawingPaths?.length) {
@@ -403,6 +551,9 @@ export class Canvas2D {
         else if (action == 'config') {
             Object.entries(v).forEach(([configID, val]) => {
                 this[configID] = val;
+                if (configID == 'EMITS_VISIBLE') {
+                    this.engine.EMITS_ENABLED = val;
+                }
             });
         }
         else if (action == 'showWeakLinks') {
@@ -434,25 +585,25 @@ export class Canvas2D {
         }
         else if (action == 'toggleEmits') {
             this.EMITS_VISIBLE = !this.EMITS_VISIBLE;
-            this.engine.EMITS_VISIBLE = !this.engine.EMITS_VISIBLE;
+            this.engine.EMITS_ENABLED = this.EMITS_VISIBLE;
         }
 
         if (this.INITIALIZED) {
             if (action == 'stop') {
-                this.stopSim()
+                this.stopSim();
             }
             else if (action == 'reset') {
                 this.reset();
             }
             else if (action == 'maxGroupLevels') {
-                this.engine.setMaxGroupLevels(v)
+                this.engine.setMaxGroupLevels(v);
             }
             else if (action == 'addNodes') {
                 Array(v).fill().forEach(() => {
                     this.addNode({}, false);
                 });
 
-                this.updateGraph()
+                this.updateGraph();
             }
             else if (action == 'pulse') {
                 const currentLinkDecay = this.DECAY_RATE;
@@ -472,26 +623,20 @@ export class Canvas2D {
         }
     }
 
-    async deleteSaved(stateID) {
+    async deleteSavedStates(stateID) {
         delIDB(`spooky-state-${stateID}`);
 
-        let savedStates = await this.getSaved();
+        let savedStates = await this.getSavedStates();
         delete savedStates[stateID];
         ToJSONIDB('spooky-saved-states', savedStates);
     }
 
-    async getSaved() {
+    async getSavedStates() {
         return await JSONFromIDB('spooky-saved-states') || {};
     }
 
-    async getSavedList() {
-        let saved = await this.getSaved();
-        saved = saved || {
-                        'test': {
-                            id: 'bork',
-                            ts: Date.now(),
-                        }}
-
+    async getSavedStateList() {
+        let saved = await this.getSavedStates();
         const savedList = Object.keys(saved)
             .map(key => {
                 return saved[key];
@@ -501,6 +646,169 @@ export class Canvas2D {
             });
 
         return savedList;
+    }
+
+    async deleteSavedChunk(chunkID) {
+        delIDB(`spooky-chunk-${chunkID}`);
+
+        let savedChunks = await this.getSavedChunks();
+        delete savedChunks[chunkID];
+        ToJSONIDB('spooky-saved-chunks', savedChunks);
+    }
+
+    async getSavedChunks() {
+        return await JSONFromIDB('spooky-saved-chunks') || {};
+    }
+
+    async getSavedChunkList() {
+        let saved = await this.getSavedChunks();
+        const savedList = Object.keys(saved)
+            .map(key => {
+                saved[key].selected = false;
+                return saved[key];
+            })
+            .sort((a, b) => {
+                return b.ts - a.ts;
+            });
+
+        return savedList;
+    }
+
+    async saveChunk(sourceData, chunkID = null, sourceDim = null) {
+        chunkID = chunkID || 'chunk-' + parseInt((Math.random() * 9000000) + 1000000).toString();
+
+        let thumbnailDataUrl = null
+        if (sourceDim) {
+            thumbnailDataUrl = createCanvasThumbnail(this.ctx, 100, sourceDim);
+        }
+
+        let savedChunks = await this.getSavedChunks();
+        savedChunks[chunkID] = {
+            id: chunkID,
+            ts: Date.now(),
+            thumbnail: thumbnailDataUrl,
+        }
+
+        const newChunk = {
+            links: sourceData.links.map(l => {
+                delete l.index;
+                return {
+                    ...l,
+                    source: l.source.id,
+                    target: l.target.id,
+                }
+            }),
+            nodes: sourceData.nodes.map(node => {
+                return node.serialize();
+            }),
+        }
+
+        ToJSONIDB(`spooky-chunk-${chunkID}`, newChunk);
+        ToJSONIDB('spooky-saved-chunks', savedChunks);
+    }
+
+    async injectChunk(chunkID, screenPos) {
+        chunkID = chunkID;
+
+        screenPos = screenPos || {
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight
+        }
+
+        const graphPos = this.graph.screen2GraphCoords(screenPos.x, screenPos.y);
+
+        const chunkData = await this.loadChunk(chunkID);
+
+        const numCurrentNodes = Object.keys(this.engine.nodeIdx).length;
+        const numChunkNodes = Object.values(chunkData.nodeIdx).filter(n => !n.isContained).length;
+
+        if (numCurrentNodes + numChunkNodes > this.NUM_NODES) {
+            UIConfig.updateValue('Base', 'numNodes', this.NUM_NODES + numChunkNodes)
+            //this.NUM_NODES += numChunkNodes;
+        }
+
+        function calculateCentroid(coords) {
+            const n = coords.length;
+            if (n === 0) return { x: 0, y: 0 };
+
+            const sum = coords.reduce((acc, curr) => ({
+                x: acc.x + curr.x,
+                y: acc.y + curr.y
+            }), { x: 0, y: 0 });
+
+            return { x: sum.x / n, y: sum.y / n };
+        }
+
+        const chunkCentroid = calculateCentroid(Object.values(chunkData.nodeIdx).filter(n => !n.isContained));
+        const diffX = graphPos.x - chunkCentroid.x,
+            diffY = graphPos.y - chunkCentroid.y;
+
+        Object.values(chunkData.nodeIdx).forEach(n => {
+            // doesn't matter if contained get updated
+
+            n.x += diffX;
+            n.y += diffY;
+        })
+
+        this.engine.nodeIdx = {
+            ...this.engine.nodeIdx,
+            ...chunkData.nodeIdx
+        }
+
+        this.engine.links = [...this.engine.links, ...chunkData.links];
+        this.updateGraph();
+    }
+
+    async loadChunk(chunkID) {
+        let chunk = await JSONFromIDB(`spooky-chunk-${chunkID}`);
+        if (!chunk) {
+            return;
+        }
+
+        const nodeIDMap = {};
+
+        const nodeIdx = {};
+        chunk.nodes.forEach(nodeStruct => {
+            let origNodeID = nodeStruct.id;
+
+            // Remap all the IDs to ensure they are unique and within the allocated range
+            //if (origNodeID in this.engine.nodeIdx || origNodeID > this.engine.lastNodeID) {
+                // Ensure unique IDs
+
+            // FIXME
+            this.engine.lastNodeID += 1;
+            const newNodeID = this.engine.lastNodeID;
+
+            nodeIDMap[origNodeID] = newNodeID;
+            nodeStruct.id = newNodeID;
+
+            const node = new Node();
+            node.init(nodeStruct);
+            nodeIdx[node.id] = node;
+        })
+
+        const links = chunk.links
+            .map(l => {
+                const sourceNodeID = nodeIDMap[l.source] || l.source;
+                const targetNodeID = nodeIDMap[l.target] || l.target;
+
+                let source = nodeIdx[sourceNodeID],
+                    target = nodeIdx[targetNodeID];
+
+                if (source && target) {
+                    return {
+                        ...l,
+                        source,
+                        target,
+                    }
+                }
+            })
+            .filter(l => !!l);
+
+        return {
+            nodeIdx,
+            links
+        }
     }
 
     async save(stateID) {
@@ -514,7 +822,7 @@ export class Canvas2D {
         const ctx = this.ctx;
         const thumbnailDataUrl = createCanvasThumbnail(ctx);
 
-        let savedStates = await this.getSaved();
+        let savedStates = await this.getSavedStates();
         savedStates[stateID] = {
             id: stateID,
             ts: Date.now(),
@@ -553,11 +861,6 @@ export class Canvas2D {
         
         ToJSONIDB(`spooky-state-${stateID}`, newState);
         ToJSONIDB('spooky-saved-states', savedStates);
-        /*try {
-        }
-        catch (e) {
-            //alert('Too big to save to localstorage')
-        }*/
 
         if (wasRunning) {
             this.startSim();
@@ -609,9 +912,11 @@ export class Canvas2D {
 
         if ('EMITS_ENABLED' in savedState.config) {
             this.EMITS_VISIBLE = savedState.config.EMITS_ENABLED;
+            this.engine.EMITS_ENABLED = this.EMITS_VISIBLE;
         }
         else {
             this.EMITS_VISIBLE = savedState.config.EMITS_VISIBLE;
+            this.engine.EMITS_ENABLED = this.EMITS_VISIBLE;
         }
 
         this.BACKGROUND_ENABLED = savedState.config.BACKGROUND_ENABLED;
@@ -845,32 +1150,6 @@ export class Canvas2D {
         return node.id in this.zoomFilterIn;
     }
 
-    createNode(id = null, x = null, y = null) {
-        if (id === null) {
-            this.lastNodeID += 1;
-            id = this.lastNodeID;
-        }
-
-        if (x === null) {
-            x = (Math.random() * window.innerWidth) - (window.innerWidth / 2);
-        }
-
-        if (y === null) {
-            y = (Math.random() * window.innerHeight) - (window.innerHeight / 2);
-        }
-
-        const node = new Node(id)
-        node.init({
-            x,
-            y,
-            baseHealth: this.NODE_HEALTH,
-            health: this.NODE_HEALTH,
-            radius: this.BASE_NODE_RADIUS,
-        });
-
-        return node;
-    }
-
     addNode({x, y}, inBounds = true) {
         let graphX, graphY;
 
@@ -914,6 +1193,10 @@ export class Canvas2D {
         if (!ctx) return;
 
         this.engine.emits.forEach((emit, i) => {
+            if (emit.h <= 0) {
+                return
+            }
+
             if (!(emit.source.id in this.engine.nodeIdx)) {
                 return;
             }
