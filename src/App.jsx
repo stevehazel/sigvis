@@ -8,6 +8,10 @@ import {
 } from './canvas2d';
 
 import {
+    Sphere3D,
+} from './sphere3d';
+
+import {
     setups as staticSetups,
 } from './setups';
 
@@ -19,6 +23,7 @@ const INITIAL_NUM_NODES = 1;
 
 const renderers = {
     'flat': Canvas2D,
+    'sphere': Sphere3D,
 }
 
 function App() {
